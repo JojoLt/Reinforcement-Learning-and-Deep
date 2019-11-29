@@ -13,7 +13,6 @@ import torch.optim as optim
 import torchvision
 import matplotlib.pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
-from torchviz import make_dot
 import time
 
 
@@ -96,7 +95,7 @@ class DQN(object):
         if (self.lasta is not None) :
 
             #Store transition in D
-            self.D.add((self.Q_chap(torch.from_numpy(self.lasts).float()), int(self.lasta),reward,self.Q_chap(torch.from_numpy(observation).float()), done))
+            self.D.add((self.Q(torch.from_numpy(self.lasts).float()), int(self.lasta),reward,self.Q_chap(torch.from_numpy(observation).float()), done))
 
             #Sample random minibatch of transitions
             batch = self.D.sample()
@@ -126,7 +125,7 @@ class DQN(object):
                 yj = rj.detach()
                 for i,d in enumerate(tabDone) :
                     if not d :
-                        yj[i] += self.gamma * maxs[i]
+                        yj[i] += self.gamma * maxs[i].detach()
 
             #yj = torch.from_numpy(yj)
             
@@ -146,26 +145,28 @@ class DQN(object):
             #Tensorboard for the loss
             self.writer.add_scalar('loss', loss, self.nb_iter)
             
-            
+            """
             debuglist = list()
             for name, param in self.Q.named_parameters():
                 if param.requires_grad and name=="layers.1.weight":
                     if len(debuglist)!=0 and debuglist[-1]==param.data :
                         print("pas de modification")
                         time.sleep(10)
+            """
 
             #Gradient descent
             self.optimizer.zero_grad()
-            loss.backward(retain_graph=False)
+            loss.backward(retain_graph=True)
+
 
             for param in self.Q.parameters():
                 param.grad.data.clamp_(-1,1)
+            
             self.optimizer.step()
 
             #Mise à jour de Q_chap en fonction de C
             self.cnt+=1
             if self.cnt==self.C :
-                print("i've made a copy")
                 self.copy()
                 self.cnt=0
             
@@ -173,8 +174,8 @@ class DQN(object):
         rd = random.random()
 
         if (rd >= self.eps) : #choix en fonction du max de Q.
-            choice=torch.argmax(self.Q_chap(torch.from_numpy(observation).float()))
-            yj_pred = self.Q_chap(torch.from_numpy(observation).float())
+            choice=torch.argmax(self.Q(torch.from_numpy(observation).float()))
+            yj_pred = self.Q(torch.from_numpy(observation).float())
             
             #print(yj_pred)
             #yj_pred = self.Q(torch.from_numpy(self.D.sample()).unsqueeze(0))
@@ -199,8 +200,7 @@ class DQN(object):
         
 
 if __name__ == '__main__':
-
-
+    #device = torch.device("cuda")
 
     env = gym.make('CartPole-v1')
 
@@ -209,6 +209,8 @@ if __name__ == '__main__':
 
     # Enregistrement de l'Agent
     agent = DQN(env.action_space, env.observation_space, writer)
+
+    
     
     outdir = 'cartpole-v0/random-agent-results'
     envm = wrappers.Monitor(env, directory=outdir, force=True, video_callable=False)
