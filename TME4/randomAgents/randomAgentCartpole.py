@@ -66,7 +66,7 @@ class RandomAgent(object):
 class DQN(object):
     """The world's simplest agent!"""
 
-    def __init__(self, action_space, observation_space, writer, layers=[30,30], lengthMemory= 1000, eps=0.1, eps_decay=0.9999, lr = 1e-2, C=100, batch_length=50, gamma=0.999):
+    def __init__(self, action_space, observation_space, writer, layers=[30,30], lengthMemory= 10000, eps=0.1, eps_decay=0.9999, lr = 1e-2, C=100, batch_length=500, gamma=0.999):
         self.nbAct = action_space.n
         self.nbObs = observation_space.shape[0]
         self.D = Memory(lengthMemory,batch_length)
@@ -75,7 +75,7 @@ class DQN(object):
         self.gamma = gamma
         self.Q = NN(self.nbObs, self.nbAct, layers)
         self.Q_chap = copy.deepcopy(self.Q)
-        self.optimizer = optim.SGD(self.Q.parameters(), lr=lr)
+        self.optimizer = optim.Adam(self.Q.parameters(), lr=lr)
         self.criterion = nn.SmoothL1Loss() 
         self.lasta = None
         self.lasts = None
@@ -136,11 +136,10 @@ class DQN(object):
 
             x = Qj.gather(1,inds.view(-1,1))
             x.requires_grad_(True)
-            x = torch.clamp(x,min=-1.0, max=1.0)
             
 
             loss = self.criterion(x.double(),yj.double().view(-1,1))
-            loss = torch.clamp(loss, min=-1.0, max=1.0)
+            
             if (torch.autograd.gradcheck(self.criterion,(x.double(),yj.double().view(-1,1)),eps=1e-2,atol=1e-2,raise_exception=True)!=True):
                 print("error of gradcheck")
 
@@ -157,7 +156,10 @@ class DQN(object):
 
             #Gradient descent
             self.optimizer.zero_grad()
-            loss.backward(retain_graph=True)
+            loss.backward(retain_graph=False)
+
+            for param in self.Q.parameters():
+                param.grad.data.clamp_(-1,1)
             self.optimizer.step()
 
             #Mise à jour de Q_chap en fonction de C
