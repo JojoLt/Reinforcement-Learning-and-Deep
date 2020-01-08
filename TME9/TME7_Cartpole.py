@@ -2,7 +2,7 @@ import matplotlib
 
 matplotlib.use("TkAgg")
 import gym
-import gridworld
+#import gridworld
 from gym import wrappers, logger
 import numpy as np
 import copy

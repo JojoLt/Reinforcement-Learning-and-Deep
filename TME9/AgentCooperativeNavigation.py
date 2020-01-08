@@ -16,6 +16,8 @@ import torch
 import torchvision
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.optim as optim
+
 
 """
 Code for creating a multiagent environment with one of the scenarios listed
@@ -109,7 +111,7 @@ class NN(nn.Module):
 
 
 class MADDPG(object):
-    def __init__(self, nbAgent, state_dim, action_dim=[2,2,2],Q_layer=[30,30], mu_layer=[30,30], lengthMemory= 1000000, eps=0.01, eps_decay=0.9999, lr = 1e-2, C=100, batch_length=100, gamma=0.999,tau=0.5):
+    def __init__(self, nbAgent, state_dim=[14,14,14], action_dim=[2,2,2],Q_layer=[30,30], mu_layer=[30,30], lengthMemory= 1000000, eps=0.01, eps_decay=0.9999, lr = 1e-2, C=100, batch_length=100, gamma=0.999,tau=0.5):
         self.nbAgent = nbAgent
         self.action_dim = action_dim
         self.state_dim = state_dim
@@ -118,14 +120,14 @@ class MADDPG(object):
         self.epsDecay = eps_decay
         self.gamma = gamma
         self.tau=tau
-        
-        self.Q = [NN(state_dim+nbAgent*action_dim[i], 1, Q_layer) for i in range(self.nbAgent)]
-        self.Q_targ = [copy.deepcopy(self.Q) for i in range(self.nbAgent)]
-        self.Q_optimizer = [optim.Adam(self.Q.parameters(), lr=lr) for i in range(self.nbAgent)]
+
+        self.Q = [NN(sum(state_dim)+sum(action_dim), 1, Q_layer) for i in range(self.nbAgent)]
+        self.Q_targ = copy.deepcopy(self.Q)
+        self.Q_optimizer = [optim.Adam(self.Q[i].parameters(), lr=lr) for i in range(self.nbAgent)]
         self.criterion = nn.MSELoss()
         
         
-        self.policy = [NN(state_dim, action_dim[i], mu_layer) for i in range(nbAgent)]
+        self.policy = [NN(sum(state_dim), action_dim[i], mu_layer) for i in range(nbAgent)]
         self.policy_targ = [copy.deepcopy(self.policy[i]) for i in range(nbAgent)]
         self.policy_optimizer = [optim.Adam(self.policy[i].parameters(), lr=lr) for i in range(nbAgent)]
 
@@ -138,8 +140,9 @@ class MADDPG(object):
     def act(self,obs):
         a=[]
         for i in range(self.nbAgent):
-            a_i = self.policy[i](torch.Tensor(obs).float()).detach() + torch.randn(2)
+            a_i = self.policy[i](torch.Tensor(np.asarray(obs).reshape(-1)).float()).detach() + torch.randn(2)
             a_i = torch.clamp(a_i,min=-1,max=1)
+            a_i = a_i.numpy()
             a.append(a_i)
         return a
 
@@ -150,35 +153,57 @@ class MADDPG(object):
         if done:
             exit
 
-        #Randomly sample a batch of transitions from D
-        batch = self.D.sample()
-        for i in range(len(batch)):
-            for j in range(self.nbAgent):
-                s = batch[i][0][j] #A revoir :)
-        s = np.array([batch[i][0] for i in range(len(batch))])
-        s = torch.from_numpy(s).float()
-        sprim = np.array([batch[i][3] for i in range(len(batch))]) 
-        sprim = torch.from_numpy(sprim).float()
+        #Foreach Agent
+        for n in range(self.nbAgent) :
+            #Randomly sample a batch of transitions from D
+            batch = self.D.sample()
 
-        d = np.array([int(batch[i][4]) for i in range(len(batch))])
-        d = torch.from_numpy(d).float()
+            s = np.array([np.asarray(batch[i][0]).reshape(-1) for i in range(len(batch))])
+            s = torch.from_numpy(s).float()
 
-        r = np.array([batch[i][2] for i in range(len(batch))])
-        r = torch.from_numpy(r).float()
+            sprim = np.array([np.asarray(batch[i][3]).reshape(-1) for i in range(len(batch))]) 
+            sprim = torch.from_numpy(sprim).float()
 
-        mu = []
+            d = np.array([batch[i][4] for i in range(len(batch))])
+
+            r = np.array([batch[i][2][n] for i in range(len(batch))])
+            r = torch.from_numpy(r).float()
+
+            a = np.array([np.asarray(batch[i][1]).reshape(-1) for i in range(len(batch))])
+            a = torch.from_numpy(a).float()
+
+            aprim = np.array([np.asarray(self.act(np.asarray(batch[0][3]))).reshape(-1) for i in range(len(batch))])
+            aprim = torch.from_numpy(aprim).float()
+
+            y_i =  r.view(-1,1) + self.gamma * self.Q_targ[n](torch.cat((sprim,aprim), dim=1))
+
+
+            #Update critic
+            self.Q_optimizer[n].zero_grad()
+
+            loss = self.criterion(self.Q_targ[n](torch.cat((s,a),dim=1)),y_i)
+            loss.backward()
+
+            self.Q_optimizer[n].step()
+
+            #Update actor
+            self.policy_optimizer[n].zero_grad()
+
+            print(self.policy_targ[n](s)*self.Q_targ[n](torch.cat((s,a),dim=1)))
+
+            actor_loss = (-1)*self.policy_targ[n](s)*self.Q_targ[n](torch.cat((s,a),dim=1))
+
+            actor_loss.backward()
+
+            self.policy_optimizer[n].step()
+
+            #tmp = (-1)*self.Q(torch.cat((s,self.policy(s)),dim=1)).sum()/len(batch)
         
-        #for i in range(self.nbAgent):
-        #    mu.append(self.policy_targ[i](sprim).detach())
-
-        mu = [self.policy_targ[i](sprim).detach() for i in range(self.nbAgent)]
-        cc=torch.cat((sprim,mu.view(-1)),dim=1)
+            #tmp.backward()
+            #self.policy_optimizer[n].step()
 
 
-        q = [self.Q_targ[i](cc) for i in range(self.nbAgent)]
 
-
-        
 
 
 
@@ -188,22 +213,40 @@ if __name__ == '__main__':
 
 
     env,scenario,world = make_env('simple_spread')
+
     nbAgent = len(env.agents)
+
     action_dim = 2
+    obs_dim = 14
+
+    agent = MADDPG(nbAgent)
 
     o = env.reset()
-    print(o[0])
-    reward = []
-    for _ in range(100):
-        a = []
-        for i, _ in enumerate(env.agents):
-            a.append((np.random.rand(2)-0.5)*2)
-        o, r, d, i = env.step(a)
-        #print(o, r, d, i)
-    
-        reward.append(r)
-        env.render(mode="none")
-    #print(reward)
+
+    EPOCHS = 10
+
+    for i_episode in range(EPOCHS) :
+        o = env.reset()
+        rsum = np.zeros(3)
+        env.render()
+        for t in range(100):
+            #action = []
+            #for i, _ in enumerate(env.agents):
+            #    action.append((np.random.rand(2)-0.5)*2)
+            lastObs = o
+            action = agent.act(o)
+            
+            o, r, done, i = env.step(action)
+            env.render()
+            
+            rsum = rsum + np.array(r)
+            agent.update(lastObs,action,r,o,done)
+            #print(o, r, d, i)
+
+            if not done:
+                print("Episode {} : {}".format(i_episode, list(rsum)))
+                
+
 
 
     env.close()

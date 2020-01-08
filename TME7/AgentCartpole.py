@@ -14,6 +14,30 @@ import torchvision
 import matplotlib.pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
 
+
+class Memory(object) :
+    def __init__(self, N, batch_length):
+        self.cnt = 0
+        self.N = N
+        self.D = list(np.zeros(N))
+        self.batch_length = batch_length
+
+    def add(self,input):
+        self.D[self.cnt%self.N] = input
+        self.cnt += 1
+
+    def sample(self) :
+        if self.cnt>self.N :
+            choice = np.random.choice(self.N,self.batch_length)
+        elif self.cnt < self.batch_length:
+            choice = np.arange(self.cnt)
+        else : 
+            choice = np.random.choice(self.cnt,self.batch_length)
+        tmp = np.array(self.D)
+        return tmp[choice]
+
+
+
 class NN(torch.nn.Module):
     def __init__(self, inSize, outSize, layers=[]): #execute layers passages en couche
         super(NN, self).__init__()
@@ -32,7 +56,7 @@ class NN(torch.nn.Module):
         return x
 
 class PPOAdaptKL(object) :
-    def __init__(self,state_dim,action_dim,layers_V,layers_Pi,gamma) :
+    def __init__(self,state_dim,action_dim,layers_V=[30,30],layers_Pi=[30,30],gamma) :
 
         self.V=NN(state_dim,1,layers_V)
         self.Pi=NN(state_dim,action_dim,layers_Pi)
@@ -43,6 +67,10 @@ class PPOAdaptKL(object) :
 
     def act(self, observation, reward, done):
         # self.Pi(observation)
+
+
+    def update(self, observation, reward, done)
+
 
 if __name__ == '__main__':
 
